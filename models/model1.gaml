@@ -4,6 +4,7 @@ global {
 	int nb_people <- 2147;
 	int nb_shelters <- 10;
 	float step <- 5 #mn;
+	float seed_value <- 42.0;
 	file roads_shapefile <- file("../includes/roads.shp");
 	file buildings_shapefile <- file("../includes/buildings.shp");
 	geometry shape <- envelope(roads_shapefile);
@@ -19,7 +20,8 @@ global {
 
 	// Flood simulation
 	float flood_speed <- 1.0 #km/#h;
-	float flood_y_position <- 0.0;
+	string flood_direction <- "bottom"; // bottom, top, left, right
+	float flood_position <- 0.0;
 	geometry flood_area <- nil;
 	bool flood_complete <- false;
 
@@ -93,14 +95,37 @@ global {
 
 	reflex update_flood {
 		// Advance flood position at specified speed
-		flood_y_position <- flood_y_position + (flood_speed * step);
+		flood_position <- flood_position + (flood_speed * step);
 
-		// Create flood area from Y=0 to current flood position
-		if flood_y_position <= shape.height {
-			flood_area <- rectangle(shape.width, flood_y_position) at_location {shape.location.x, flood_y_position / 2};
-		} else {
-			flood_area <- shape;
-			flood_complete <- true;
+		// Create flood area based on direction
+		if flood_direction = "bottom" {
+			if flood_position <= shape.height {
+				flood_area <- rectangle(shape.width, flood_position) at_location {shape.location.x, flood_position / 2};
+			} else {
+				flood_area <- shape;
+				flood_complete <- true;
+			}
+		} else if flood_direction = "top" {
+			if flood_position <= shape.height {
+				flood_area <- rectangle(shape.width, flood_position) at_location {shape.location.x, shape.height - flood_position / 2};
+			} else {
+				flood_area <- shape;
+				flood_complete <- true;
+			}
+		} else if flood_direction = "left" {
+			if flood_position <= shape.width {
+				flood_area <- rectangle(flood_position, shape.height) at_location {flood_position / 2, shape.location.y};
+			} else {
+				flood_area <- shape;
+				flood_complete <- true;
+			}
+		} else if flood_direction = "right" {
+			if flood_position <= shape.width {
+				flood_area <- rectangle(flood_position, shape.height) at_location {shape.width - flood_position / 2, shape.location.y};
+			} else {
+				flood_area <- shape;
+				flood_complete <- true;
+			}
 		}
 	}
 
@@ -124,9 +149,22 @@ species people skills:[moving]{
 
 	reflex detect_nearby_flood when: !is_aware {
 		// People become aware if flood is within 200m
-		if flood_area != nil and (location.y - flood_y_position < 200) {
-			is_aware <- true;
-			nb_aware <- nb_aware + 1;
+		if flood_area != nil {
+			float distance_to_flood <- 9999.0;
+			if flood_direction = "bottom" {
+				distance_to_flood <- location.y - flood_position;
+			} else if flood_direction = "top" {
+				distance_to_flood <- (shape.height - location.y) - flood_position;
+			} else if flood_direction = "left" {
+				distance_to_flood <- location.x - flood_position;
+			} else if flood_direction = "right" {
+				distance_to_flood <- (shape.width - location.x) - flood_position;
+			}
+
+			if distance_to_flood < 200 {
+				is_aware <- true;
+				nb_aware <- nb_aware + 1;
+			}
 		}
 	}
 
@@ -169,7 +207,17 @@ species people skills:[moving]{
 			person_color <- #gray;
 		} else if flood_area != nil {
 			// Aware people: orange if close to flood, green otherwise
-			float distance_to_flood <- location.y - flood_y_position;
+			float distance_to_flood <- 9999.0;
+			if flood_direction = "bottom" {
+				distance_to_flood <- location.y - flood_position;
+			} else if flood_direction = "top" {
+				distance_to_flood <- (shape.height - location.y) - flood_position;
+			} else if flood_direction = "left" {
+				distance_to_flood <- location.x - flood_position;
+			} else if flood_direction = "right" {
+				distance_to_flood <- (shape.width - location.x) - flood_position;
+			}
+
 			if distance_to_flood < 100 {
 				person_color <- #orange;
 			}
@@ -205,6 +253,8 @@ species building {
 experiment main type: gui {
 	parameter "Number of shelters" var: nb_shelters min: 1 max: 100;
 	parameter "Flood speed (km/h)" var: flood_speed min: 0.1 max: 10.0 step: 0.1;
+	parameter "Flood direction" var: flood_direction among: ["bottom", "top", "left", "right"];
+	parameter "Random seed" var: seed_value min: 0.0 max: 1000.0;
 
 	output {
 		// Real-time Monitors
@@ -213,7 +263,7 @@ experiment main type: gui {
 		monitor "Still Evacuating" value: string(length(people)) + " (" + string(with_precision((length(people) / nb_people) * 100, 1)) + "%)" refresh: every(1 #cycles);
 		monitor "Elapsed Time" value: string(with_precision((time - start_time) / #mn, 1)) + " minutes" refresh: every(1 #cycles);
 		monitor "Congested Roads" value: string(nb_congested_roads) + " roads over capacity" refresh: every(1 #cycles);
-		monitor "Flood Progress" value: string(with_precision((flood_y_position / shape.height) * 100, 1)) + "% - " + string(with_precision(flood_y_position, 0)) + "m" refresh: every(1 #cycles);
+		monitor "Flood Progress" value: string(with_precision((flood_position / (flood_direction = "left" or flood_direction = "right" ? shape.width : shape.height)) * 100, 1)) + "% - " + string(with_precision(flood_position, 0)) + "m from " + flood_direction refresh: every(1 #cycles);
 
 		display map type: 2d {
 			species road aspect:geom;
@@ -257,6 +307,8 @@ experiment main type: gui {
 experiment limited_info type: gui {
 	parameter "Number of shelters" var: nb_shelters min: 1 max: 100;
 	parameter "Flood speed (km/h)" var: flood_speed min: 0.1 max: 10.0 step: 0.1;
+	parameter "Flood direction" var: flood_direction among: ["bottom", "top", "left", "right"];
+	parameter "Random seed" var: seed_value min: 0.0 max: 1000.0;
 	parameter "Initial aware (%)" var: initial_aware_percentage min: 0.0 max: 100.0 step: 1.0;
 	parameter "Additional aware per wave (%)" var: additional_aware_percentage min: 0.0 max: 100.0 step: 1.0;
 	parameter "Cycles between waves" var: cycles_between_waves min: 1 max: 20;
@@ -274,7 +326,7 @@ experiment limited_info type: gui {
 		monitor "Still Evacuating" value: string(length(people where each.is_aware)) + " (" + string(with_precision((length(people where each.is_aware) / nb_people) * 100, 1)) + "%)" refresh: every(1 #cycles);
 		monitor "Elapsed Time" value: string(with_precision((time - start_time) / #mn, 1)) + " minutes" refresh: every(1 #cycles);
 		monitor "Congested Roads" value: string(nb_congested_roads) + " roads over capacity" refresh: every(1 #cycles);
-		monitor "Flood Progress" value: string(with_precision((flood_y_position / shape.height) * 100, 1)) + "% - " + string(with_precision(flood_y_position, 0)) + "m" refresh: every(1 #cycles);
+		monitor "Flood Progress" value: string(with_precision((flood_position / (flood_direction = "left" or flood_direction = "right" ? shape.width : shape.height)) * 100, 1)) + "% - " + string(with_precision(flood_position, 0)) + "m from " + flood_direction refresh: every(1 #cycles);
 
 		display map type: 2d {
 			species road aspect:geom;
