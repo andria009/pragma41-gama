@@ -304,6 +304,73 @@ experiment main type: gui {
 	}
 }
 
+experiment batch_simulation type: batch repeat: 1 keep_seed: true until: empty(people) or flood_complete {
+	parameter "Number of shelters" var: nb_shelters min: 1 max: 100 step: 1;
+	parameter "Flood speed (km/h)" var: flood_speed min: 0.1 max: 5.0 step: 0.1;
+	parameter "Flood direction" var: flood_direction among: ["bottom", "top", "left", "right"];
+
+	int min_casualties <- 999999;
+	int max_casualties <- -1;
+	map<string,unknown> best_config <- [];
+	map<string,unknown> worst_config <- [];
+	int simulations_number <- 100 * 50 * 4;
+	int simulation_number <- 0;
+
+	reflex save_results when: empty(people) or flood_complete {
+		// Update minimum casualties configuration
+		if nb_casualties < min_casualties {
+			min_casualties <- nb_casualties;
+			best_config <- [
+				"nb_shelters"::nb_shelters,
+				"flood_speed"::flood_speed,
+				"flood_direction"::flood_direction,
+				"casualties"::nb_casualties,
+				"survivors"::nb_survivors,
+				"survival_rate"::(nb_survivors / nb_people) * 100
+			];
+		}
+
+		// Update maximum casualties configuration
+		if nb_casualties > max_casualties {
+			max_casualties <- nb_casualties;
+			worst_config <- [
+				"nb_shelters"::nb_shelters,
+				"flood_speed"::flood_speed,
+				"flood_direction"::flood_direction,
+				"casualties"::nb_casualties,
+				"survivors"::nb_survivors,
+				"survival_rate"::(nb_survivors / nb_people) * 100
+			];
+		}
+
+		// Save each simulation result to CSV
+		save [nb_shelters, flood_speed, flood_direction, nb_casualties, nb_survivors, (nb_survivors / nb_people) * 100]
+			to: "../results/simulation_results.csv" format: "csv" rewrite: false header: true;
+
+		// Print final report when all simulations are complete
+		if (simulation_number = simulations_number - 1) {
+			write "\n========== SIMULATION RESULTS ==========";
+			write "\nBEST CONFIGURATION (Minimum Casualties):";
+			write "  - Number of shelters: " + best_config["nb_shelters"];
+			write "  - Flood speed: " + best_config["flood_speed"] + " km/h";
+			write "  - Flood direction: " + best_config["flood_direction"];
+			write "  - Casualties: " + best_config["casualties"] + " (" + with_precision(100 - float(best_config["survival_rate"]), 1) + "%)";
+			write "  - Survivors: " + best_config["survivors"] + " (" + with_precision(float(best_config["survival_rate"]), 1) + "%)";
+
+			write "\nWORST CONFIGURATION (Maximum Casualties):";
+			write "  - Number of shelters: " + worst_config["nb_shelters"];
+			write "  - Flood speed: " + worst_config["flood_speed"] + " km/h";
+			write "  - Flood direction: " + worst_config["flood_direction"];
+			write "  - Casualties: " + worst_config["casualties"] + " (" + with_precision(100 - float(worst_config["survival_rate"]), 1) + "%)";
+			write "  - Survivors: " + worst_config["survivors"] + " (" + with_precision(float(worst_config["survival_rate"]), 1) + "%)";
+
+			write "\nTotal simulations completed: " + simulations_number;
+			write "Results saved to: ../results/simulation_results.csv";
+			write "========================================\n";
+		}
+	}
+}
+
 experiment limited_info type: gui {
 	parameter "Number of shelters" var: nb_shelters min: 1 max: 100;
 	parameter "Flood speed (km/h)" var: flood_speed min: 0.1 max: 10.0 step: 0.1;
